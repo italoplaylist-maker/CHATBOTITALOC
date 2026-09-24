@@ -13,7 +13,8 @@
     "start": "prisma migrate deploy && node dist/index.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "channel:upsert": "tsx src/scripts/upsert-channel.ts"
+    "channel:upsert": "node dist/scripts/upsert-channel.js",
+    "channel:upsert:dev": "tsx src/scripts/upsert-channel.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.128.0",

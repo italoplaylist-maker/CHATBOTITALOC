@@ -47,9 +47,18 @@ CHANNEL_ACCESS_TOKEN=<token> npm run channel:upsert -- \
   --name "Nome da empresa" --display "+55 37 3232-0000"
 ```
 
-Em produção, rode o comando no terminal do container (Coolify → Terminal). O
-token vai por variável de ambiente, não por argumento. `--bot off` deixa o
-número só com atendimento humano.
+Em produção, rode o comando no terminal do container (Coolify → Terminal),
+depois do primeiro deploy. Ele usa o código já compilado (`dist/`). Em
+desenvolvimento, use `npm run channel:upsert:dev`. O token vai por variável
+de ambiente, não por argumento. `--bot off` deixa o número só com
+atendimento humano.
+
+O id da empresa no Italoc não aparece em nenhuma tela. Pegue no banco do
+Italoc (Coolify → banco do Italoc → Terminal):
+
+```sql
+SELECT id, name FROM "Company";
+```
 
 Janela de 24h: texto livre só vale até 24h depois da última mensagem do
 cliente. Depois disso, só modelo aprovado na Meta (endpoint
