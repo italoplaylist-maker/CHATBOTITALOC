@@ -18,6 +18,37 @@ export function createAnthropicAiClient(opts: { timeoutMs: number }): AiClient {
   return { createMessage: (params) => client.beta.messages.create(params) };
 }
 
+type ModelOptions = Pick<CreateParams, "thinking" | "output_config" | "betas" | "fallbacks">;
+
+/** Orçamento de raciocínio do Haiku 4.5 — pouco, só o suficiente pra decidir bem qual ferramenta chamar. */
+export const HAIKU_THINKING_BUDGET = 2048;
+
+/**
+ * Cada família de modelo aceita parâmetros diferentes — mandar o que o
+ * modelo não aceita é erro 400 e o cliente fica sem resposta:
+ *
+ * - Haiku 4.5 (padrão, mais barato): raciocínio por orçamento fixo de
+ *   tokens; não aceita `effort` nem o fallback de recusa no servidor.
+ * - Opus 5 / Opus 5.5 / Fable / Mythos: raciocínio adaptativo com `effort`, e
+ *   recusa do modelo refeita no mesmo request pelo modelo que a Anthropic
+ *   recomenda pra aquela categoria.
+ * - Demais atuais (Sonnet 5, Opus 4.x, Sonnet 4.6): adaptativo com `effort`.
+ */
+export function modelRequestOptions(model: string, effort: "low" | "medium" | "high"): ModelOptions {
+  if (model.startsWith("claude-haiku-4-5")) {
+    return { thinking: { type: "enabled", budget_tokens: HAIKU_THINKING_BUDGET } };
+  }
+  if (/^claude-(opus-5|fable|mythos)/.test(model)) {
+    return {
+      thinking: { type: "adaptive" },
+      output_config: { effort },
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default",
+    };
+  }
+  return { thinking: { type: "adaptive" }, output_config: { effort } };
+}
+
 /** A IA não respondeu (API fora, sem crédito, timeout...) — quem chamou manda a mensagem de fallback e chama um atendente. */
 export class AiUnavailableError extends Error {}
 
@@ -85,12 +116,7 @@ export async function runAgent(ai: AiClient, italoc: ItalocApi, input: AgentInpu
         ],
         tools: TOOL_DEFINITIONS,
         messages,
-        thinking: { type: "adaptive" },
-        output_config: { effort: input.effort },
-        // Recusa do modelo principal é refeita pelo modelo recomendado pela
-        // Anthropic pra aquela categoria, no mesmo request.
-        betas: ["server-side-fallback-2026-07-01"],
-        fallbacks: "default",
+        ...modelRequestOptions(input.model, input.effort),
       });
     } catch (error) {
       if (error instanceof Anthropic.APIError) throw new AiUnavailableError(`API da IA respondeu ${error.status ?? "erro"}: ${error.message}`);

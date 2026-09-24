@@ -116,3 +116,41 @@ describe("histórico, janela e opt-out", () => {
     expect([1, 2, 3].map(retryDelayMs)).toEqual([5000, 20000, 80000]);
   });
 });
+
+describe("parâmetros por modelo (erro 400 = cliente sem resposta)", () => {
+  it("Haiku 4.5: raciocínio por orçamento, sem effort nem fallback de servidor", async () => {
+    const { modelRequestOptions, HAIKU_THINKING_BUDGET } = await import("../src/ai/agent.js");
+    expect(modelRequestOptions("claude-haiku-4-5", "high")).toEqual({ thinking: { type: "enabled", budget_tokens: HAIKU_THINKING_BUDGET } });
+    expect(HAIKU_THINKING_BUDGET).toBeGreaterThanOrEqual(1024); // mínimo da API
+    expect(HAIKU_THINKING_BUDGET).toBeLessThan(16000); // precisa ser menor que max_tokens
+  });
+
+  it("Opus 5: adaptativo com effort e fallback de recusa", async () => {
+    const { modelRequestOptions } = await import("../src/ai/agent.js");
+    expect(modelRequestOptions("claude-opus-5", "low")).toEqual({
+      thinking: { type: "adaptive" },
+      output_config: { effort: "low" },
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default",
+    });
+  });
+
+  it("Sonnet 5: adaptativo com effort, sem fallback", async () => {
+    const { modelRequestOptions } = await import("../src/ai/agent.js");
+    expect(modelRequestOptions("claude-sonnet-5", "medium")).toEqual({ thinking: { type: "adaptive" }, output_config: { effort: "medium" } });
+  });
+
+  it("padrão da configuração é o Haiku 4.5", async () => {
+    const { loadConfig } = await import("../src/config.js");
+    const config = loadConfig({
+      DATABASE_URL: "postgresql://x",
+      META_APP_SECRET: "a".repeat(16),
+      META_VERIFY_TOKEN: "b".repeat(16),
+      CHANNEL_TOKEN_KEY: Buffer.alloc(32).toString("base64"),
+      ITALOC_BASE_URL: "http://italoc:3000",
+      ITALOC_SHARED_SECRET: "c".repeat(32),
+      ANTHROPIC_API_KEY: "x",
+    });
+    expect(config.AI_MODEL).toBe("claude-haiku-4-5");
+  });
+});

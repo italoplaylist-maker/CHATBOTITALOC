@@ -36,8 +36,8 @@ assumir enquanto a IA ainda está pensando, a resposta da IA é descartada.
 
 ## IA
 
-- Modelo configurável (`AI_MODEL`, padrão `claude-opus-5`), pensamento adaptativo e `effort` configurável (`AI_EFFORT`).
-- Recusa do modelo é refeita no mesmo request pelo modelo que a Anthropic recomenda (`fallbacks: "default"`).
+- Modelo configurável (`AI_MODEL`), padrão **`claude-haiku-4-5`** (o mais barato), com raciocínio por orçamento fixo (2048 tokens). Para respostas mais cuidadosas, `AI_MODEL=claude-opus-5`: aí valem o raciocínio adaptativo, o `AI_EFFORT` e o refazer da recusa no mesmo request pelo modelo que a Anthropic recomenda (`fallbacks: "default"`). Cada família recebe só os parâmetros que aceita (`modelRequestOptions`, `src/ai/agent.ts`).
+- Cache do prompt: no Haiku 4.5, o cache só entra a partir de 4096 tokens de prefixo. Se o prompt fixo + ferramentas ficar abaixo disso, cada resposta paga o prompt inteiro. O custo real aparece em `AiRun` (tokens de entrada, saída e lidos do cache).
 - O prompt fixo e as ferramentas ficam em cache. O contexto da conversa (data, empresa, cliente identificado) vai depois do ponto de cache.
 - **Nunca inventa** preço, estoque, prazo ou financeiro: tudo vem das ferramentas. Se uma ferramenta falhar, a IA recebe um erro explícito com a orientação de não inventar.
 - Se a API da IA cair (depois dos retries do SDK), o cliente recebe uma mensagem fixa e a conversa vai para atendente (`AWAITING_AGENT`, com aviso no Italoc).

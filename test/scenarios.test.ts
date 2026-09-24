@@ -132,6 +132,23 @@ describe("atendimento pela IA", () => {
     expect((await lastBotMessage())!.text).toBe("Você tem a LOC-000245 em andamento.");
   });
 
+  it("com o Haiku 4.5 (padrão), o request sai sem effort nem fallback — senão a API recusa", async () => {
+    await createChannel();
+    const ai = scriptedAi([textResponse("Olá!")]);
+    const deps = makeDeps({ ai });
+    deps.config = { ...deps.config, AI_MODEL: "claude-haiku-4-5" };
+    await postWebhook(makeApp(deps), metaPayload([{ id: "wamid.h", text: "oi" }]));
+    await drainQueue(deps);
+    const request = ai.requests[0];
+    expect(request.model).toBe("claude-haiku-4-5");
+    expect(request.thinking).toEqual({ type: "enabled", budget_tokens: 2048 });
+    expect(request.output_config).toBeUndefined();
+    expect(request.fallbacks).toBeUndefined();
+    expect(request.betas).toBeUndefined();
+    expect(request.tools?.every((t) => "strict" in t && t.strict)).toBe(true);
+    expect((await lastBotMessage())!.text).toBe("Olá!");
+  });
+
   // Cenário 2
   it("cliente desconhecido vira lead (registrar_interesse), sem criar cliente", async () => {
     await createChannel();

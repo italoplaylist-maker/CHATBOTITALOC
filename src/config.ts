@@ -27,7 +27,9 @@ const schema = z.object({
 
   // IA (Anthropic). ANTHROPIC_API_KEY é lida pelo próprio SDK.
   ANTHROPIC_API_KEY: z.string().min(1),
-  AI_MODEL: z.string().default("claude-opus-5"),
+  /** Padrão: Haiku 4.5, o mais barato. claude-opus-5 responde com mais cuidado, custando ~5x mais. */
+  AI_MODEL: z.string().default("claude-haiku-4-5"),
+  /** Só vale pros modelos que aceitam effort (Opus/Sonnet atuais) — o Haiku 4.5 ignora. */
   AI_EFFORT: z.enum(["low", "medium", "high"]).default("medium"),
   AI_TIMEOUT_MS: z.coerce.number().int().positive().default(90000),
   AI_MAX_TOOL_ROUNDS: z.coerce.number().int().min(1).max(20).default(8),
