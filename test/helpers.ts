@@ -5,7 +5,7 @@ import type { Deps } from "../src/deps.js";
 import type { AiClient } from "../src/ai/agent.js";
 import type { ItalocApi, ItalocResult } from "../src/italoc/client.js";
 import type { WhatsAppSender } from "../src/whatsapp/client.js";
-import { encryptSecret } from "../src/lib/crypto.js";
+import { encryptSecret, hashWebhookToken } from "../src/lib/crypto.js";
 import { createApp } from "../src/http/app.js";
 import { claimNextJob } from "../src/queue/jobs.js";
 import { runJob } from "../src/queue/worker.js";
@@ -39,9 +39,50 @@ export async function createChannel(opts: { companyId?: string; phoneNumberId?: 
   });
 }
 
+export const EVO_TOKEN = "segredo-da-url-do-webhook-evolution-0123456789";
+
+export async function createEvolutionChannel(opts: { companyId?: string; instance?: string; token?: string; apiBaseUrl?: string } = {}) {
+  return prisma.channel.create({
+    data: {
+      companyId: opts.companyId ?? COMPANY_A,
+      name: "Empresa Evolution",
+      provider: "EVOLUTION",
+      phoneNumberId: opts.instance ?? "oscontrol-aaaa1111",
+      apiBaseUrl: opts.apiBaseUrl ?? "http://evolution.local",
+      accessTokenEnc: encryptSecret("evo-apikey-de-teste", TOKEN_KEY),
+      webhookTokenHash: hashWebhookToken(opts.token ?? EVO_TOKEN),
+    },
+  });
+}
+
+/** Corpo do webhook da Evolution v2 (evento messages.upsert). */
+export function evolutionPayload(
+  instance: string,
+  m: { id: string; from?: string; text?: string; fromMe?: boolean; source?: string; jid?: string; key?: Record<string, unknown>; message?: Record<string, unknown> },
+) {
+  return {
+    event: "messages.upsert",
+    instance,
+    data: {
+      key: { remoteJid: m.jid ?? `${m.from ?? "5511987654321"}@s.whatsapp.net`, fromMe: m.fromMe ?? false, id: m.id, ...m.key },
+      pushName: "Maria",
+      message: m.message ?? { conversation: m.text ?? "oi" },
+      messageType: "conversation",
+      messageTimestamp: Math.floor(Date.now() / 1000),
+      source: m.source ?? "android",
+    },
+    date_time: new Date().toISOString(),
+    sender: "553700000000@s.whatsapp.net",
+  };
+}
+
+export async function postEvolution(app: ReturnType<typeof makeApp>, body: unknown, token = EVO_TOKEN) {
+  return app.request(`/webhooks/evolution/${token}`, { method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json" } });
+}
+
 /** WhatsApp de mentira: grava o que seria enviado. */
 export function fakeWhatsApp() {
-  const sent: { to: string; text?: string; template?: string; phoneNumberId: string; accessToken: string }[] = [];
+  const sent: { to: string; text?: string; template?: string; phoneNumberId: string; accessToken: string; provider: string }[] = [];
   let failNext: { errorCode: string; retryable: boolean } | null = null;
   let counter = 0;
   const sender: WhatsAppSender & { sent: typeof sent; failNext(e: { errorCode: string; retryable: boolean }): void } = {
@@ -55,11 +96,11 @@ export function fakeWhatsApp() {
         failNext = null;
         return { ok: false, errorCode: f.errorCode, retryable: f.retryable, error: "falha simulada" };
       }
-      sent.push({ to: input.to, text: input.text, phoneNumberId: input.phoneNumberId, accessToken: input.accessToken });
+      sent.push({ to: input.to, text: input.text, phoneNumberId: input.channel.externalId, accessToken: input.channel.accessToken, provider: input.channel.provider });
       return { ok: true, waMessageId: `wamid.out.${++counter}` };
     },
     async sendTemplate(input) {
-      sent.push({ to: input.to, template: input.template.name, phoneNumberId: input.phoneNumberId, accessToken: input.accessToken });
+      sent.push({ to: input.to, template: input.template.name, phoneNumberId: input.channel.externalId, accessToken: input.channel.accessToken, provider: input.channel.provider });
       return { ok: true, waMessageId: `wamid.out.${++counter}` };
     },
     async markRead() {},

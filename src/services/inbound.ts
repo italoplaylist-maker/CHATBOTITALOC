@@ -1,8 +1,9 @@
 import { Prisma, type MessageStatus } from "@prisma/client";
 import type { Deps } from "../deps.js";
-import { parseWebhook, messageAsConversationText, type InboundMessageEvent, type StatusEvent } from "../whatsapp/webhook.js";
+import { parseWebhook, messageAsConversationText, type InboundMessageEvent, type StatusEvent, type WebhookEvent } from "../whatsapp/webhook.js";
+import { parseEvolutionWebhook } from "../whatsapp/evolution-webhook.js";
 import { enqueueJob, REPLY_JOB, replyDedupeKey } from "../queue/jobs.js";
-import { preview } from "./conversation.js";
+import { changeStatus, preview } from "./conversation.js";
 import { log } from "../logger.js";
 
 /**
@@ -23,15 +24,30 @@ export function isOptOutMessage(text: string | null): boolean {
   return /^\s*(parar|sair|stop|cancelar mensagens|n[aã]o quero (mais )?receber( mensagens)?)\s*[.!]?\s*$/i.test(text);
 }
 
-export async function ingestWebhook(deps: Pick<Deps, "db">, body: unknown): Promise<{ messages: number; duplicates: number; statuses: number }> {
+export interface IngestOptions {
+  provider: "META" | "EVOLUTION";
+  /** Evolution: o canal já identificado pelo segredo da URL — evento de outro canal é descartado. */
+  channelId?: string;
+}
+
+const PARSERS: Record<IngestOptions["provider"], (body: unknown) => WebhookEvent[]> = {
+  META: parseWebhook,
+  EVOLUTION: parseEvolutionWebhook,
+};
+
+export async function ingestWebhook(
+  deps: Pick<Deps, "db">,
+  body: unknown,
+  opts: IngestOptions = { provider: "META" },
+): Promise<{ messages: number; duplicates: number; statuses: number }> {
   const event = await deps.db.webhookEvent.create({ data: { payload: (body ?? {}) as Prisma.InputJsonValue } });
   const summary = { messages: 0, duplicates: 0, statuses: 0 };
   try {
-    for (const item of parseWebhook(body)) {
+    for (const item of PARSERS[opts.provider](body)) {
       if (item.kind === "status") {
         await applyStatus(deps, item);
         summary.statuses++;
-      } else if (await ingestMessage(deps, item)) summary.messages++;
+      } else if (await ingestMessage(deps, item, opts)) summary.messages++;
       else summary.duplicates++;
     }
     await deps.db.webhookEvent.update({ where: { id: event.id }, data: { processedAt: new Date() } });
@@ -52,12 +68,19 @@ async function applyStatus(deps: Pick<Deps, "db">, event: StatusEvent) {
 }
 
 /** Devolve false quando a mensagem já tinha sido recebida (duplicada). */
-async function ingestMessage(deps: Pick<Deps, "db">, event: InboundMessageEvent): Promise<boolean> {
+async function ingestMessage(deps: Pick<Deps, "db">, event: InboundMessageEvent, opts: IngestOptions): Promise<boolean> {
   const channel = await deps.db.channel.findUnique({ where: { phoneNumberId: event.phoneNumberId } });
   if (!channel || !channel.active) {
     log.warn("mensagem para número não cadastrado/inativo ignorada", { phoneNumberId: event.phoneNumberId });
     return false;
   }
+  // Evento de um provedor nunca alimenta canal de outro, e o webhook da
+  // Evolution (autenticado pelo segredo de UM canal) só alimenta esse canal.
+  if (channel.provider !== event.provider || (opts.channelId && channel.id !== opts.channelId)) {
+    log.warn("evento para canal de outro provedor/segredo ignorado", { channelId: channel.id });
+    return false;
+  }
+  if (event.fromMe) return ingestPhoneReply(deps, channel.id, event);
 
   const conversation = await deps.db.conversation.upsert({
     where: { channelId_waId: { channelId: channel.id, waId: event.waId } },
@@ -111,6 +134,46 @@ async function ingestMessage(deps: Pick<Deps, "db">, event: InboundMessageEvent)
 
   if (updated.status === "BOT" && channel.botEnabled && !NO_REPLY_TYPES.has(event.type)) {
     await enqueueJob(deps.db, { type: REPLY_JOB, conversationId: conversation.id, dedupeKey: replyDedupeKey(conversation.id) });
+  }
+  return true;
+}
+
+/**
+ * Alguém da empresa respondeu pelo próprio celular (Evolution = WhatsApp Web,
+ * o aparelho continua funcionando). Registra a fala como de atendente e tira
+ * a conversa do bot, pra IA não responder por cima de um humano. Só vale pra
+ * conversa que já existe — conversa pessoal iniciada pelo celular não vira
+ * atendimento no painel.
+ */
+async function ingestPhoneReply(deps: Pick<Deps, "db">, channelId: string, event: InboundMessageEvent): Promise<boolean> {
+  const conversation = await deps.db.conversation.findUnique({ where: { channelId_waId: { channelId, waId: event.waId } } });
+  if (!conversation) return false;
+  try {
+    await deps.db.message.create({
+      data: {
+        conversationId: conversation.id,
+        direction: "OUTBOUND",
+        author: "AGENT",
+        authorName: "Celular da empresa",
+        waMessageId: event.waMessageId,
+        type: event.type,
+        text: event.text,
+        mediaMime: event.mediaMime,
+        payload: event.payload ? (event.payload as Prisma.InputJsonValue) : Prisma.JsonNull,
+        status: "SENT",
+      },
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") return false;
+    throw error;
+  }
+  await deps.db.message.updateMany({ where: { conversationId: conversation.id, direction: "INBOUND", handledAt: null }, data: { handledAt: new Date() } });
+  await deps.db.conversation.update({
+    where: { id: conversation.id },
+    data: { lastMessageAt: new Date(), lastMessagePreview: preview(event.text ?? `[${event.type}]`), unreadCount: 0 },
+  });
+  if (conversation.status === "BOT" || conversation.status === "AWAITING_AGENT") {
+    await changeStatus(deps, conversation, "HUMAN", { kind: "phone_reply", reason: "Respondido pelo celular da empresa.", userName: "Celular da empresa" });
   }
   return true;
 }

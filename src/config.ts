@@ -11,9 +11,10 @@ const schema = z.object({
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
   DATABASE_URL: z.string().min(1),
 
-  // Meta / WhatsApp Cloud API
-  META_APP_SECRET: z.string().min(16),
-  META_VERIFY_TOKEN: z.string().min(16),
+  // Meta / WhatsApp Cloud API — opcionais: sem eles, o webhook da Meta fica
+  // desligado (só números pela Evolution API).
+  META_APP_SECRET: z.string().min(16).optional(),
+  META_VERIFY_TOKEN: z.string().min(16).optional(),
   META_GRAPH_BASE_URL: z.string().url().default("https://graph.facebook.com"),
   META_GRAPH_VERSION: z.string().regex(/^v\d+\.\d+$/).default("v23.0"),
   /** 32 bytes em base64 — criptografa os tokens de acesso dos números (Channel.accessTokenEnc). */

@@ -7,6 +7,13 @@
 
 export interface InboundMessageEvent {
   kind: "message";
+  provider: "META" | "EVOLUTION";
+  /**
+   * Mensagem mandada DO número da empresa, digitada no celular (só Evolution:
+   * o WhatsApp Web recebe também o que sai do aparelho). É um humano
+   * respondendo por fora do painel.
+   */
+  fromMe?: boolean;
   phoneNumberId: string;
   waId: string;
   contactName: string | null;
@@ -22,6 +29,7 @@ export interface InboundMessageEvent {
 
 export interface StatusEvent {
   kind: "status";
+  provider: "META" | "EVOLUTION";
   phoneNumberId: string;
   waMessageId: string;
   status: "sent" | "delivered" | "read" | "failed";
@@ -100,6 +108,7 @@ export function parseWebhook(body: unknown): WebhookEvent[] {
         const seconds = Number(m.timestamp);
         events.push({
           kind: "message",
+          provider: "META",
           phoneNumberId,
           waId,
           contactName: str(contact?.profile?.name),
@@ -114,7 +123,7 @@ export function parseWebhook(body: unknown): WebhookEvent[] {
         const waMessageId = str(s?.id);
         if (!waMessageId || !["sent", "delivered", "read", "failed"].includes(status)) continue;
         const code = Array.isArray(s.errors) && s.errors[0]?.code != null ? String(s.errors[0].code) : null;
-        events.push({ kind: "status", phoneNumberId, waMessageId, status, errorCode: code });
+        events.push({ kind: "status", provider: "META", phoneNumberId, waMessageId, status, errorCode: code });
       }
     }
   }

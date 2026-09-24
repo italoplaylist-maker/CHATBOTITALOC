@@ -13,22 +13,38 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/// Número de WhatsApp (Meta Cloud API) de uma empresa do Italoc. Um
-/// serviço atende várias empresas: o phone_number_id que chega no webhook
-/// diz de qual empresa é a mensagem.
+/// Por onde o número conversa: WhatsApp Cloud API oficial (Meta) ou
+/// Evolution API (WhatsApp Web, não oficial — sem janela de 24h, mas com
+/// risco de o número ser banido).
+enum ChannelProvider {
+  META
+  EVOLUTION
+}
+
+/// Número de WhatsApp de uma empresa do Italoc. Um serviço atende várias
+/// empresas: o identificador que chega no webhook diz de qual empresa é a
+/// mensagem.
 model Channel {
-  id             String   @id @default(uuid())
-  companyId      String /// id da empresa no Italoc
-  name           String
-  phoneNumberId  String   @unique
-  displayPhone   String?
-  /// Token de acesso da Meta, criptografado (AES-256-GCM, CHANNEL_TOKEN_KEY). Nunca sai da API.
-  accessTokenEnc String
-  active         Boolean  @default(true)
+  id               String          @id @default(uuid())
+  companyId        String /// id da empresa no Italoc
+  name             String
+  provider         ChannelProvider @default(META)
+  /// Identificador do número no provedor: phone_number_id na Meta, nome da instância na Evolution.
+  phoneNumberId    String          @unique
+  displayPhone     String?
+  /// URL do servidor da Evolution API (só EVOLUTION).
+  apiBaseUrl       String?
+  /// Credencial do provedor, criptografada (AES-256-GCM, CHANNEL_TOKEN_KEY): token da Meta ou
+  /// apikey da Evolution. Nunca sai da API.
+  accessTokenEnc   String
+  /// SHA-256 do segredo que vai na URL do webhook da Evolution (ela não assina o corpo). O
+  /// segredo em si não fica guardado.
+  webhookTokenHash String?         @unique
+  active           Boolean         @default(true)
   /// Desligado = todas as conversas deste número ficam só com atendente humano.
-  botEnabled     Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  botEnabled       Boolean         @default(true)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
 
   conversations Conversation[]
 

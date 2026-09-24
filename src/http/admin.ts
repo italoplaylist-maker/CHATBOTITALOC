@@ -4,7 +4,7 @@ import type { Conversation, Channel, ConversationStatus } from "@prisma/client";
 import type { Deps } from "../deps.js";
 import { COMPANY_HEADER, SIGNATURE_HEADER, TIMESTAMP_HEADER, verifyServiceSignature } from "../lib/signature.js";
 import { changeStatus, ConversationError, sendOutboundTemplate, sendOutboundText } from "../services/conversation.js";
-import { isWithinServiceWindow } from "../whatsapp/client.js";
+import { canSendFreeText } from "../whatsapp/client.js";
 
 /**
  * API administrativa usada SÓ pelo servidor do Italoc (painel de
@@ -31,8 +31,8 @@ function view(c: Conversation & { channel: Channel }) {
     lastMessagePreview: c.lastMessagePreview,
     unreadCount: c.unreadCount,
     optOut: c.optOut,
-    withinServiceWindow: isWithinServiceWindow(c.lastInboundAt),
-    channel: { id: c.channel.id, name: c.channel.name, displayPhone: c.channel.displayPhone, botEnabled: c.channel.botEnabled },
+    withinServiceWindow: canSendFreeText(c.channel.provider, c.lastInboundAt),
+    channel: { id: c.channel.id, name: c.channel.name, provider: c.channel.provider, displayPhone: c.channel.displayPhone, botEnabled: c.channel.botEnabled },
   };
 }
 
@@ -195,11 +195,16 @@ export function adminRoutes(deps: Deps, opts: { secret: string }) {
     const conversation = await load(c);
     if (!conversation) return c.json({ error: "Conversa não encontrada." }, 404);
     if (conversation.optOut) return c.json({ error: "Este contato pediu para não receber mensagens ativas.", code: "opt_out" }, 422);
-    const message = await sendOutboundTemplate(deps, conversation, {
-      template: { name: input.data.name, language: input.data.language, bodyParams: input.data.bodyParams },
-      authorName: input.data.userName,
-    });
-    return c.json({ message: { id: message.id, status: message.status, errorCode: message.errorCode } });
+    try {
+      const message = await sendOutboundTemplate(deps, conversation, {
+        template: { name: input.data.name, language: input.data.language, bodyParams: input.data.bodyParams },
+        authorName: input.data.userName,
+      });
+      return c.json({ message: { id: message.id, status: message.status, errorCode: message.errorCode } });
+    } catch (error) {
+      if (error instanceof ConversationError) return c.json({ error: error.message, code: error.code }, 422);
+      throw error;
+    }
   });
 
   return app;

@@ -38,7 +38,7 @@ describe("parseWebhook", () => {
 
   it("lê status de entrega e ignora corpo que não é do WhatsApp", () => {
     const body = { object: "whatsapp_business_account", entry: [{ changes: [{ field: "messages", value: { metadata: { phone_number_id: "P" }, statuses: [{ id: "wamid.x", status: "failed", errors: [{ code: 131047 }] }] } }] }] };
-    expect(parseWebhook(body)).toEqual([{ kind: "status", phoneNumberId: "P", waMessageId: "wamid.x", status: "failed", errorCode: "131047" }]);
+    expect(parseWebhook(body)).toEqual([{ kind: "status", provider: "META", phoneNumberId: "P", waMessageId: "wamid.x", status: "failed", errorCode: "131047" }]);
     expect(parseWebhook({ object: "page" })).toEqual([]);
     expect(parseWebhook(null)).toEqual([]);
   });
@@ -152,5 +152,24 @@ describe("parâmetros por modelo (erro 400 = cliente sem resposta)", () => {
       ANTHROPIC_API_KEY: "x",
     });
     expect(config.AI_MODEL).toBe("claude-haiku-4-5");
+  });
+});
+
+describe("segredo da URL do webhook da Evolution", () => {
+  it("erro não tratado no webhook não escreve o segredo no log", async () => {
+    const { createApp } = await import("../src/http/app.js");
+    const writes: string[] = [];
+    const original = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: string) => (writes.push(String(chunk)), true)) as typeof process.stderr.write;
+    try {
+      const db = { channel: { findUnique: async () => { throw new Error("banco fora"); } } };
+      const app = createApp({ db } as never, { config: { META_APP_SECRET: undefined, META_VERIFY_TOKEN: undefined, ITALOC_SHARED_SECRET: "x".repeat(32) } });
+      const res = await app.request("/webhooks/evolution/SEGREDO-QUE-NAO-PODE-VAZAR-0123456789", { method: "POST", body: "{}" });
+      expect(res.status).toBe(500);
+    } finally {
+      process.stderr.write = original;
+    }
+    expect(writes.join("")).not.toContain("SEGREDO-QUE-NAO-PODE-VAZAR");
+    expect(writes.join("")).toContain("[redacted]");
   });
 });

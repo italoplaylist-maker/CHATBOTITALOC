@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 
 /**
  * AES-256-GCM pro token de acesso da Meta guardado no banco (mesmo formato
@@ -19,4 +19,14 @@ export function decryptSecret(envelope: string, keyBase64: string): string {
   const decipher = createDecipheriv("aes-256-gcm", Buffer.from(keyBase64, "base64"), Buffer.from(iv, "base64"));
   decipher.setAuthTag(Buffer.from(tag, "base64"));
   return Buffer.concat([decipher.update(Buffer.from(data, "base64")), decipher.final()]).toString("utf8");
+}
+
+/** Segredo novo pra URL do webhook da Evolution (só aparece uma vez, na hora do cadastro). */
+export function generateWebhookToken(): string {
+  return randomBytes(32).toString("base64url");
+}
+
+/** O banco guarda só o hash do segredo da URL — vazou o banco, não vazou a URL. */
+export function hashWebhookToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
 }

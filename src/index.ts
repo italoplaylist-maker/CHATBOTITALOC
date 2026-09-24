@@ -16,7 +16,7 @@ async function main() {
   const deps: Deps = {
     db: prisma,
     config,
-    whatsapp: createWhatsAppSender({ baseUrl: config.META_GRAPH_BASE_URL, version: config.META_GRAPH_VERSION }),
+    whatsapp: createWhatsAppSender({ metaBaseUrl: config.META_GRAPH_BASE_URL, metaVersion: config.META_GRAPH_VERSION }),
     italoc: createItalocClient({ baseUrl: config.ITALOC_BASE_URL, secret: config.ITALOC_SHARED_SECRET, timeoutMs: config.ITALOC_TIMEOUT_MS }),
     ai: createAnthropicAiClient({ timeoutMs: config.AI_TIMEOUT_MS }),
   };

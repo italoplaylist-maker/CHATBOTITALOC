@@ -3,7 +3,7 @@ import type { Deps } from "../deps.js";
 import { runAgent, AiUnavailableError, type AgentResult } from "../ai/agent.js";
 import { buildHistory } from "../ai/history.js";
 import { FALLBACK_MESSAGE, HANDOFF_FALLBACK_MESSAGE, type ConversationContext } from "../ai/prompt.js";
-import { changeStatus, channelAccessToken, deliverMessage, preview, sendOutboundText } from "./conversation.js";
+import { changeStatus, channelCredentials, deliverMessage, preview, sendOutboundText } from "./conversation.js";
 import { log } from "../logger.js";
 
 /**
@@ -117,7 +117,7 @@ export async function processReplyJob(deps: Deps, job: Job): Promise<void> {
   // Marca a última mensagem do cliente como lida (os dois tiques azuis) — só cosmético, falha é ignorada.
   if (trigger.waMessageId) {
     deps.whatsapp
-      .markRead({ phoneNumberId: fresh.channel.phoneNumberId, accessToken: channelAccessToken(fresh.channel, deps.config.CHANNEL_TOKEN_KEY), waMessageId: trigger.waMessageId })
+      .markRead({ channel: channelCredentials(fresh.channel, deps.config.CHANNEL_TOKEN_KEY), to: fresh.waId, waMessageId: trigger.waMessageId })
       .catch(() => undefined);
   }
 

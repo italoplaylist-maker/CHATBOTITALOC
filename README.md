@@ -1,15 +1,16 @@
 # CHATBOTITALOC
 
-Atendimento automático por WhatsApp (Meta Cloud API + Claude) para empresas
+Atendimento automático por WhatsApp (Evolution API ou Meta Cloud API + Claude) para empresas
 que usam o **Italoc**. É um serviço separado: o Italoc continua sendo a fonte
 da verdade (clientes, equipamentos, preços, disponibilidade, orçamentos,
 locações, financeiro, Pix). Este serviço guarda só as conversas e consulta
 tudo o mais pela API interna autenticada do Italoc, sem acessar o banco dele.
 
 ```
-Cliente (WhatsApp) ──► Meta ──► POST /webhooks/whatsapp ──► grava + fila ──► worker
+Cliente (WhatsApp) ──► Evolution ──► POST /webhooks/evolution/<segredo> ─┐
+                  └─► Meta ──────► POST /webhooks/whatsapp ─────────────┴► grava + fila ──► worker
                                                                            │
-                                     resposta ◄── Meta ◄── IA (Claude) ◄───┤ ferramentas
+                                     resposta ◄── Evolution/Meta ◄── IA (Claude) ◄───┤ ferramentas
                                                                            ▼
                                                   Italoc /api/internal/chatbot/* (HMAC)
 Painel do Italoc (/atendimento) ──► /admin/* deste serviço (HMAC, só servidor→servidor)

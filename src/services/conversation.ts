@@ -2,7 +2,7 @@ import type { Channel, Conversation, ConversationStatus, MessageAuthor } from "@
 import type { Deps } from "../deps.js";
 import { decryptSecret } from "../lib/crypto.js";
 import { enqueueJob, SEND_JOB } from "../queue/jobs.js";
-import { isWithinServiceWindow, type TemplateMessage } from "../whatsapp/client.js";
+import { canSendFreeText, type ChannelCredentials, type TemplateMessage } from "../whatsapp/client.js";
 import { log } from "../logger.js";
 
 export class ConversationError extends Error {
@@ -14,8 +14,14 @@ export class ConversationError extends Error {
   }
 }
 
-export function channelAccessToken(channel: Channel, key: string): string {
-  return decryptSecret(channel.accessTokenEnc, key);
+/** Credencial do canal descriptografada — só em memória, pro envio. */
+export function channelCredentials(channel: Channel, key: string): ChannelCredentials {
+  return {
+    provider: channel.provider,
+    externalId: channel.phoneNumberId,
+    apiBaseUrl: channel.apiBaseUrl,
+    accessToken: decryptSecret(channel.accessTokenEnc, key),
+  };
 }
 
 export function preview(text: string): string {
@@ -66,7 +72,7 @@ export async function sendOutboundText(
   input: { author: Exclude<MessageAuthor, "CUSTOMER">; text: string; authorName?: string | null },
 ) {
   const now = new Date();
-  if (!isWithinServiceWindow(conversation.lastInboundAt, now)) {
+  if (!canSendFreeText(conversation.channel.provider, conversation.lastInboundAt, now)) {
     throw new ConversationError("outside_window", "Passaram mais de 24h desde a última mensagem do cliente — a Meta só permite enviar um modelo (template) aprovado.");
   }
   const message = await deps.db.message.create({
@@ -97,11 +103,11 @@ export async function deliverMessage(
   const message = await deps.db.message.findUniqueOrThrow({ where: { id: messageId } });
   if (message.waMessageId || (message.status !== "PENDING" && message.status !== "FAILED")) return { ok: true };
 
-  const accessToken = channelAccessToken(conversation.channel, deps.config.CHANNEL_TOKEN_KEY);
+  const channel = channelCredentials(conversation.channel, deps.config.CHANNEL_TOKEN_KEY);
   const payload = message.payload as { template?: TemplateMessage } | null;
   const result = payload?.template
-    ? await deps.whatsapp.sendTemplate({ phoneNumberId: conversation.channel.phoneNumberId, accessToken, to: conversation.waId, template: payload.template })
-    : await deps.whatsapp.sendText({ phoneNumberId: conversation.channel.phoneNumberId, accessToken, to: conversation.waId, text: message.text ?? "" });
+    ? await deps.whatsapp.sendTemplate({ channel, to: conversation.waId, template: payload.template })
+    : await deps.whatsapp.sendText({ channel, to: conversation.waId, text: message.text ?? "" });
 
   if (result.ok) {
     await deps.db.message.update({ where: { id: message.id }, data: { status: "SENT", waMessageId: result.waMessageId, errorCode: null } });
@@ -128,6 +134,9 @@ export async function sendOutboundTemplate(
   conversation: Conversation & { channel: Channel },
   input: { template: TemplateMessage; authorName?: string | null },
 ) {
+  if (conversation.channel.provider !== "META") {
+    throw new ConversationError("template_unsupported", "Modelo (template) só existe na API oficial da Meta. Pela Evolution, envie texto normal.");
+  }
   const text = `[Modelo ${input.template.name}]${input.template.bodyParams?.length ? ` ${input.template.bodyParams.join(" | ")}` : ""}`;
   const message = await deps.db.message.create({
     data: {

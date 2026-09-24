@@ -12,9 +12,17 @@
 O chatbot nunca guarda cópia de dado comercial. Ele guarda só referências
 (`companyId` do Italoc, id/nome do atendente).
 
+## Provedores de WhatsApp
+
+Cada número (`Channel`) tem um `provider`:
+- **EVOLUTION**: Evolution API v2, a mesma instância que o Italoc usa para os lembretes. O webhook é autenticado por um segredo na URL (`/webhooks/evolution/<segredo>`, o banco guarda só o SHA-256), porque a Evolution não assina o corpo. Não tem janela de 24h. Resposta digitada no celular da empresa (`fromMe` com `source` android/ios) tira a conversa do bot. Envios feitos por API pelo mesmo número (os nossos e os lembretes do Italoc) são ignorados. O id da mensagem é gravado como `evo:<instância>:<id>`.
+- **META**: WhatsApp Cloud API oficial, com assinatura `X-Hub-Signature-256`, janela de 24h e templates.
+
+Evento de um provedor nunca alimenta canal do outro, e o segredo de um canal Evolution só alimenta esse canal.
+
 ## Fluxo de uma mensagem
 
-1. `POST /webhooks/whatsapp`: valida `X-Hub-Signature-256` sobre o corpo cru (`META_APP_SECRET`).
+1. Webhook: `POST /webhooks/evolution/<segredo>` (confere o hash do segredo) ou `POST /webhooks/whatsapp` (valida `X-Hub-Signature-256` sobre o corpo cru com `META_APP_SECRET`).
 2. Grava o corpo em `WebhookEvent` (auditoria, apagado depois de `WEBHOOK_RETENTION_DAYS`).
 3. Para cada mensagem, acha o número (`Channel.phoneNumberId`, que dá a empresa), cria/acha a conversa (`channelId + waId`) e grava a mensagem com `waMessageId` **único**. Se a mensagem já existe, é duplicada e é ignorada.
 4. Conversa em modo `BOT`: enfileira `conversation.reply` com `dedupeKey = reply:<conversa>`, então fica no máximo um job pendente por conversa.
