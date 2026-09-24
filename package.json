@@ -1,0 +1,32 @@
+{
+  "name": "chatbotitaloc",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Atendimento automático por WhatsApp (Meta Cloud API + Claude) integrado ao Italoc.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "prisma migrate deploy && node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "channel:upsert": "tsx src/scripts/upsert-channel.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.128.0",
+    "@hono/node-server": "^2.1.1",
+    "@prisma/client": "^6.19.3",
+    "hono": "^4.13.9",
+    "prisma": "^6.19.3",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.1"
+  }
+}

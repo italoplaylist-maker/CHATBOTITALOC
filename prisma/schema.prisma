@@ -1,0 +1,207 @@
+// Banco PRÓPRIO do CHATBOTITALOC — só dados de conversa/atendimento.
+// Nada de cliente, equipamento, preço, locação ou financeiro aqui: isso vive
+// no Italoc (fonte da verdade) e é consultado pela API interna dele. Os
+// únicos vínculos com o Italoc são ids de referência (companyId, ids de
+// usuário do atendente), sem cópia de dado.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Número de WhatsApp (Meta Cloud API) de uma empresa do Italoc. Um
+/// serviço atende várias empresas: o phone_number_id que chega no webhook
+/// diz de qual empresa é a mensagem.
+model Channel {
+  id             String   @id @default(uuid())
+  companyId      String /// id da empresa no Italoc
+  name           String
+  phoneNumberId  String   @unique
+  displayPhone   String?
+  /// Token de acesso da Meta, criptografado (AES-256-GCM, CHANNEL_TOKEN_KEY). Nunca sai da API.
+  accessTokenEnc String
+  active         Boolean  @default(true)
+  /// Desligado = todas as conversas deste número ficam só com atendente humano.
+  botEnabled     Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  conversations Conversation[]
+
+  @@index([companyId])
+}
+
+/// BOT → AWAITING_AGENT (pediu/precisa de humano) → HUMAN (atendente assumiu) → CLOSED.
+/// A IA só responde em BOT.
+enum ConversationStatus {
+  BOT
+  AWAITING_AGENT
+  HUMAN
+  CLOSED
+}
+
+model Conversation {
+  id                 String             @id @default(uuid())
+  channelId          String
+  channel            Channel            @relation(fields: [channelId], references: [id])
+  companyId          String
+  /// Telefone do contato como o WhatsApp informa (wa_id) — é a identidade da conversa.
+  waId               String
+  contactName        String?
+  status             ConversationStatus @default(BOT)
+  assignedUserId     String?
+  assignedUserName   String?
+  handoffReason      String?
+  lastMessageAt      DateTime           @default(now())
+  /// Última mensagem do cliente — define a janela de 24h da Meta para texto livre.
+  lastInboundAt      DateTime?
+  lastMessagePreview String?
+  unreadCount        Int                @default(0)
+  /// Cliente pediu para não receber mensagens ativas (follow-up).
+  optOut             Boolean            @default(false)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  messages Message[]
+  aiRuns   AiRun[]
+  handoffs Handoff[]
+
+  @@unique([channelId, waId])
+  @@index([companyId, lastMessageAt])
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageAuthor {
+  CUSTOMER
+  BOT
+  AGENT
+  SYSTEM
+}
+
+enum MessageStatus {
+  RECEIVED
+  PENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+model Message {
+  id             String           @id @default(uuid())
+  conversationId String
+  conversation   Conversation     @relation(fields: [conversationId], references: [id])
+  direction      MessageDirection
+  author         MessageAuthor
+  authorName     String?
+  /// id da Meta (wamid) — único: é o que impede processar a mesma mensagem duas vezes.
+  waMessageId    String?          @unique
+  /// text, image, audio, video, document, location, interactive, button, sticker, template, unsupported
+  type           String
+  text           String?
+  mediaId        String?
+  mediaMime      String?
+  payload        Json?
+  status         MessageStatus
+  errorCode      String?
+  /// Mensagem do cliente já considerada numa resposta do bot.
+  handledAt      DateTime?
+  createdAt      DateTime         @default(now())
+
+  @@index([conversationId, createdAt])
+}
+
+/// Corpo cru recebido da Meta — auditoria e reprocessamento. Limpo depois de WEBHOOK_RETENTION_DAYS.
+model WebhookEvent {
+  id          String    @id @default(uuid())
+  receivedAt  DateTime  @default(now())
+  payload     Json
+  processedAt DateTime?
+  error       String?
+
+  @@index([receivedAt])
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  DONE
+  FAILED
+}
+
+/// Fila no próprio Postgres (sem Redis): FOR UPDATE SKIP LOCKED.
+model Job {
+  id             String    @id @default(uuid())
+  type           String
+  conversationId String?
+  /// Único enquanto o job está pendente (ex: "reply:<conversa>") — garante no
+  /// máximo UM pendente por conversa; zerado quando o job começa a rodar.
+  dedupeKey      String?   @unique
+  payload        Json?
+  status         JobStatus @default(PENDING)
+  attempts       Int       @default(0)
+  maxAttempts    Int       @default(3)
+  runAt          DateTime  @default(now())
+  lockedAt       DateTime?
+  lastError      String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([status, runAt])
+  @@index([conversationId, status])
+}
+
+model AiRun {
+  id              String       @id @default(uuid())
+  conversationId  String
+  conversation    Conversation @relation(fields: [conversationId], references: [id])
+  model           String
+  stopReason      String?
+  inputTokens     Int          @default(0)
+  outputTokens    Int          @default(0)
+  cacheReadTokens Int          @default(0)
+  latencyMs       Int          @default(0)
+  outcome         String /// replied | handoff | fallback | skipped
+  error           String?
+  createdAt       DateTime     @default(now())
+
+  toolCalls ToolCall[]
+
+  @@index([conversationId, createdAt])
+}
+
+model ToolCall {
+  id        String   @id @default(uuid())
+  aiRunId   String
+  aiRun     AiRun    @relation(fields: [aiRunId], references: [id])
+  name      String
+  input     Json
+  ok        Boolean
+  error     String?
+  latencyMs Int
+  createdAt DateTime @default(now())
+}
+
+model Handoff {
+  id             String             @id @default(uuid())
+  conversationId String
+  conversation   Conversation       @relation(fields: [conversationId], references: [id])
+  /// ai | customer_request | ai_failure | agent_assume | agent_release | agent_close
+  kind           String
+  reason         String?
+  fromStatus     ConversationStatus
+  toStatus       ConversationStatus
+  userId         String?
+  userName       String?
+  createdAt      DateTime           @default(now())
+
+  @@index([conversationId, createdAt])
+}
